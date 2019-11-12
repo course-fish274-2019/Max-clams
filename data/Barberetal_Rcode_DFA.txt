@@ -1,0 +1,1147 @@
+## Detailed code for reproducing all analyses in Barber et al. Spatial 
+## and temporal coherence in intertidal clams
+
+#------------------------
+# load required libraries
+#------------------------
+
+if(!require("MARSS")) {
+  install.packages("MARSS")
+  library("MARSS")
+}
+
+if(!require("RCurl")) {
+  install.packages("RCurl")
+  library("RCurl")
+}
+
+if(!require("vegan")) {
+  install.packages("vegan")
+  library("vegan")
+}
+
+if(!require("TeachingDemos")) {
+  install.packages("TeachingDemos")
+  library("TeachingDemos")
+}
+
+#-------------
+# user inputs
+#-------------
+
+# names of data sets
+
+## average annual clam biomass data
+data.set <- "20170329DFAdata.csv"
+
+## covariate data from files
+sst <- "sst.csv"
+crabcatch <- "CrabCatch.csv"
+salinity <- "Salinity.csv"
+airtemp <- "AirTemp.csv"
+
+# file to status of each model
+file.name <- "seq_DFA_status.txt"
+
+# min length of ts for analysis (years)
+ts.min <- 15
+
+# year range
+yr_frst <- 1989
+yr_last <- 2016
+
+ts <- seq(yr_frst,yr_last,1)
+
+# alternative forms of R
+R.vals = list(
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0,
+ 0,0,0,0,0,0,0,0,0,0
+ )
+
+beachVarCov = matrix(R.vals,nrow = 30, ncol = 30,byrow = TRUE)
+diag(beachVarCov) <- list("r1","r2","r3","r4","r5","r6","r7","r8","r9","r10","r1","r2","r3","r4","r5","r6","r7","r8","r9","r10","r1","r2","r3","r4","r5","r6","r7","r8","r9","r10"
+)
+
+speciesVarCov = matrix(R.vals,nrow = 30, ncol = 30,byrow = TRUE)
+diag(speciesVarCov) <- list("r1","r1","r1","r1","r1","r1","r1","r1","r1","r1","r2","r2","r2","r2","r2","r2","r2","r2","r2","r2","r3","r3","r3","r3","r3","r3","r3","r3","r3","r3"
+)
+
+basinVarCov = matrix(R.vals,nrow = 30, ncol = 30,byrow = TRUE)
+diag(basinVarCov) <- list("r1","r1","r2","r2","r3","r3","r3","r3","r4","r4","r1","r1","r2","r2","r3","r3","r3","r3","r4","r4","r1","r1","r2","r2","r3","r3","r3","r3","r4","r4"
+)
+
+#----------
+# get data
+#----------
+
+# load data
+biomass <- read.csv(data.set, header=TRUE)
+
+# select appropriate columns
+biomass <- biomass[,1:34]
+
+# trim away excluded years
+dat <- biomass[(biomass$year %in% ts),]
+
+# trim away ts with too many NA's
+dat <- dat[,apply((!is.na(dat))*1,2,sum)>=ts.min]
+
+# get years of data
+years <- dat[,1]
+
+# length of ts
+TT <- length(years)
+
+# drop year col
+dat <- dat[,-1]
+
+# constrain time series based on whether we would like to fit DFA to individual species or entire dataset
+# 1. entire, 2. sax, 3. leu, 4. cli
+entire <- dat
+sax <- dat[,grep("sa",colnames(dat))]
+leu <- dat[,grep("leu",colnames(dat))]
+cli <- dat[,grep("cli",colnames(dat))]
+
+#---------------------------------------
+# get covariates for inclusion in models
+#---------------------------------------
+
+## ----get_flow_url--------------------------------------------------------
+## flow site
+flow_site <- 12200500	
+## get URL for flow data from USGS
+flow_url <- paste0("http://waterdata.usgs.gov/nwis/dv",
+                   "?cb_00060=on",
+                   "&format=rdb",
+                   "&site_no=",flow_site,
+                   "&begin_date=",yr_frst-5,"-01-01")
+
+## ----get_flow_metadata---------------------------------------------------
+## raw flow data from USGS
+flow_raw <- readLines(flow_url)
+## lines with metadata
+hdr_flow <- which(lapply(flow_raw,grep,pattern="\\#")==1, arr.ind=TRUE)
+## print flow metadata
+print(flow_raw[hdr_flow],quote=FALSE)
+
+## ----get_flows-----------------------------------------------------------
+## flow data for years of interest
+dat_flow <-  read.csv(textConnection(flow_raw[-c(hdr_flow,max(hdr_flow+2))]),
+                      header=TRUE, stringsAsFactors=FALSE, sep="\t")
+colnames(dat_flow) <- unlist(strsplit(tolower(flow_raw[max(hdr_flow)+1]), split="\\s+"))
+head(dat_flow)
+
+## ----trim_dat_flow-------------------------------------------------------
+## keep only relevant columns
+dat_flow <- dat_flow[c("datetime",grep("[0-9]$",colnames(dat_flow),value=TRUE))]
+## nicer column names
+colnames(dat_flow) <- c("date","flow")
+## convert cubic feet to cubic meters
+dat_flow$flow <- dat_flow$flow / 35.3147
+## flow by year & month
+dat_flow[,"year"] <- as.integer(sub("^([0-9]{4})-([0-9]{2})-([0-9]{2})","\\1",
+                                    dat_flow[,"date"]))
+dat_flow[,"month"] <- as.integer(sub("^([0-9]{4})-([0-9]{2})-([0-9]{2})","\\2",
+                                     dat_flow[,"date"]))
+dat_flow <- dat_flow[,c("year","month","flow")]
+
+## ----march - june ------------------------------------------------------------
+## spring flows in year t
+flow_spr <- subset(dat_flow, (month>=3 & month<=6)
+                   & year >= yr_frst & year <= yr_last)
+
+## combined flows indexed to brood year and calculate max flow over time period
+dat_flow_spr <- aggregate(flow ~ year, data=flow_spr, mean)
+
+## for plotting purpose later
+colnames(dat_flow_spr)[2] <- "flow_spring"
+
+## ----sum_flow------------------------------------------------------------
+## summer flows in year t
+flow_sum<- subset(dat_flow, (month>=7 & month<=9)
+                   & year >= yr_frst & year <= yr_last)
+
+## combined flows indexed to brood year and calculate max flow over time period
+dat_flow_sum <- aggregate(flow ~ year, data=flow_sum, mean)
+
+## for plotting purpose later
+colnames(dat_flow_sum)[2] <- "flow_sum"
+
+
+## ----get_CUI_metadata----------------------------------------------------
+## URL for CUI data
+url_CUI <- "https://www.pfeg.noaa.gov/products/PFELData/upwell/daily/p06dayac.all"
+## raw CUI data from PFEL
+CUI_raw <- readLines(url_CUI)
+## line with data headers
+hdr_CUI <- which(lapply(CUI_raw,grep,pattern="YYYYMMDD")==1, arr.ind=TRUE)
+## print CUI metadata
+print(CUI_raw[seq(hdr_CUI-1)],quote=FALSE)
+
+## ----get_CUI-------------------------------------------------------------
+## get daily CUI data
+dat_CUI <- read.table(url_CUI, header=TRUE, stringsAsFactors=FALSE, skip=hdr_CUI-1)
+## extract year from date
+dat_CUI$yr <- gsub("[0-9]{4}$","",dat_CUI$YYYYMMDD)
+dat_CUI$month <- as.integer(sub("^([0-9]{4})([0-9]{2})([0-9]{2})","\\2",
+                                dat_CUI[,"YYYYMMDD"]))
+
+## select only years of interest
+cui <- dat_CUI[dat_CUI$yr >= yr_frst & dat_CUI$yr <= yr_last,]
+
+## ----cui - march - June------------------------------------------------------------
+cui_spr <- subset(cui, (month>=3 & month<=6)
+       & yr >= yr_frst & yr <= yr_last)
+
+dat_cui_spr <-aggregate(Index ~ yr, data=cui_spr, mean)
+
+colnames(dat_cui_spr) <- c("year","cui_mar_jun")
+
+
+## ----cui - July - Sept------------------------------------------------------------
+cui_sum <- subset(cui, (month>=7 & month<=9)
+                  & yr >= yr_frst & yr <= yr_last)
+
+dat_cui_sum<-aggregate(Index ~ yr, data=cui_sum, mean)
+colnames(dat_cui_sum) <- c("year","cui_jul_sep")
+
+## ----get_MEI_metadata----------------------------------------------------
+## raw MEI data from NOAA
+MEI_raw <- readLines("http://www.esrl.noaa.gov/psd/enso/mei/table.html")
+## line with data headers
+hdr_mei <- which(lapply(MEI_raw,grep,pattern="YEAR")==1, arr.ind=TRUE)
+## print PDO metadata
+print(MEI_raw[seq(hdr_mei-1)],quote=FALSE)
+
+
+## ----get_MEI_index-------------------------------------------------------------
+## MEI data for years of interest
+dat_MEI <- read.table("http://www.esrl.noaa.gov/psd/enso/mei/table.html",
+                      header=FALSE, stringsAsFactors=FALSE,
+                      skip=hdr_mei + yr_frst - 1950, nrows=length(ts))
+
+dat_MEI_2016 <- read.table("http://www.esrl.noaa.gov/psd/enso/mei/table.html",
+           header=FALSE, stringsAsFactors=FALSE,
+           skip=hdr_mei + 2016 - 1950, nrows=1)
+dat_MEI_2016[,c("V12","V13")] <- NA
+
+dat_MEI <- rbind(dat_MEI,dat_MEI_2016)
+
+colnames(dat_MEI) <- unlist(strsplit(tolower(MEI_raw[hdr_mei]), split="\\s+"))
+dat_MEI
+
+
+dat_MEI_jul_dec <- dat_MEI[dat_MEI$year >= yr_frst -1 & dat_MEI$year <= yr_last -1,8:13]
+dat_MEI_jan_jun<- dat_MEI[dat_MEI$year >= yr_frst & dat_MEI$year <= yr_last,2:7]
+
+dat_MEI_jul_jun <- cbind(dat_MEI_jul_dec,dat_MEI_jan_jun)
+
+## calculate average MEI for Jul - June time period
+dat_MEI_jul_jun <- cbind(year = ts,MEI_jul_jun = apply(dat_MEI_jul_jun,1,FUN = mean))
+
+
+## ----get_NPGO_metadata---------------------------------------------------
+## URL for NPGO data
+url_NPGO <- "http://www.oces.us/npgo/npgo.php"
+## raw NPGO data 
+NPGO_raw <- readLines(url_NPGO)
+## line with data headers
+hdr_NPGO <- which(lapply(NPGO_raw,grep,pattern="YEAR")==1, arr.ind=TRUE)
+## print PDO metadata
+print(NPGO_raw[seq(hdr_NPGO)],quote=FALSE)
+
+## ----get_SST_data summarized from race rocks site-------------------------------------------------------------
+sst <- read.csv(sst)
+
+
+## ----get_crab catch data-------------------------------------------------------------
+crabcatch <- read.csv(crabcatch)
+
+
+## ----get_salinity data-------------------------------------------------------------
+salinity <- read.csv(salinity)
+
+
+## ----get_airtemp data-------------------------------------------------------------
+airtemp <- read.csv(airtemp)
+
+## ----get_NPGO data-------------------------------------------------------------
+
+dat_NPGO<- read.table(url_NPGO, header=FALSE, stringsAsFactors=FALSE,
+                      skip=hdr_NPGO + (yr_frst-1950 - 1)*12, nrows = (length(ts))*12 + 10)
+colnames(dat_NPGO) <- c("year","month","NPGO")
+
+##----lag covariates 1 to 5 years---------------------------------------------------
+
+year_lag <- seq(1,5,1)
+NPGO <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+MEI <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+cui_spr <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+cui_sum <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+flow_sum <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+flow_spr <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+sst_win <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+sst_spr <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+sst_sum <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+crabHarv <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+sal <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+airTemp <- matrix(NA,nrow = length(ts),ncol = length(year_lag))
+
+for(i in year_lag){
+
+  #i = 2
+  dat_NPGO<- read.table(url_NPGO, header=FALSE, stringsAsFactors=FALSE,
+                        skip=hdr_NPGO + (yr_frst-1950 - i)*12, nrows = (length(ts))*12 + 10)
+  colnames(dat_NPGO) <- c("year","month","NPGO")
+  
+  
+  dat_NPGO_jul_dec <- subset(dat_NPGO, (month>=7 & month<=12)
+                             & year >= yr_frst - i & year <= yr_last -i)
+  
+  dat_NPGO_jan_jun <- subset(dat_NPGO, (month>=1 & month<=6)
+                             & year >= yr_frst - i + 1 & year <= yr_last - i + 1)
+  dat_NPGO_jan_jun[,"year"] <- dat_NPGO_jan_jun[,"year"] - 1
+  
+  ## combined NPGO indexed to calendar year and calculate average index over time period Jul - Jun
+  dat_NPGO_jul_jun <- aggregate(NPGO ~ year, data=rbind(dat_NPGO_jul_dec,dat_NPGO_jan_jun), mean)
+  colnames(dat_NPGO_jul_jun) <- c("year","NPGO_jul_jun")
+  
+  #dat_NPGO_jul_jun[,"year"] <- ts
+  NPGO[,i] <- dat_NPGO_jul_jun[,2]
+  
+  #####MEI
+  dat_MEI <- read.table("http://www.esrl.noaa.gov/psd/enso/mei/table.html",
+                        header=FALSE, stringsAsFactors=FALSE,
+                        skip=hdr_mei + yr_frst - 1950 - i, nrows=length(ts)+1)
+  
+
+  colnames(dat_MEI) <- unlist(strsplit(tolower(MEI_raw[hdr_mei]), split="\\s+"))
+  
+  
+  dat_MEI_jul_dec <- dat_MEI[dat_MEI$year >= yr_frst-i & dat_MEI$year <= yr_last-i,8:13]
+  dat_MEI_jan_jun<- dat_MEI[dat_MEI$year >= yr_frst-i+1 & dat_MEI$year <= yr_last-i+1,2:7]
+  dat_MEI_jul_jun <- cbind(dat_MEI_jul_dec,dat_MEI_jan_jun)
+  
+  ## calculate average MEI for Jul - June time period
+  MEI[,i] <-  apply(dat_MEI_jul_jun,1,FUN = mean)
+  
+  ######CUI
+  
+  ## ----cui - march - June------------------------------------------------------------
+  cui_spr_temp <- subset(dat_CUI, (month>=3 & month<=6)
+                    & yr >= yr_frst-i & yr <= yr_last-i)
+  
+  dat_cui_spr <-aggregate(Index ~ yr, data=cui_spr_temp, mean)
+  
+  colnames(dat_cui_spr) <- c("year","cui_mar_jun")
+  
+  cui_spr[,i] <- dat_cui_spr[,2]
+  
+  ## ----cui - July - Sept------------------------------------------------------------
+  cui_sum_temp <- subset(dat_CUI, (month>=7 & month<=9)
+                    & yr >= yr_frst-i & yr <= yr_last-i)
+  
+  dat_cui_sum<-aggregate(Index ~ yr, data=cui_sum_temp, mean)
+  colnames(dat_cui_sum) <- c("year","cui_jul_sep")
+  
+  cui_sum[,i] <- dat_cui_sum[,2]
+  
+  #######
+  ## spring flows in year t
+  flow_spr_temp <- subset(dat_flow, (month>=3 & month<=6)
+                     & year >= yr_frst-i & year <= yr_last-i)
+  
+  ## combined flows indexed to brood year and calculate max flow over time period
+  dat_flow_spr <- aggregate(flow ~ year, data=flow_spr_temp, mean)
+  
+  flow_spr[,i] <- dat_flow_spr[,2]
+  
+  ## ----sum_flow------------------------------------------------------------
+  ## summer flows in year t
+  flow_sum_temp <- subset(dat_flow, (month>=7 & month<=9)
+                    & year >= yr_frst-i & year <= yr_last-i)
+  
+  ## combined flows indexed to brood year and calculate max flow over time period
+  dat_flow_sum <- aggregate(flow ~ year, data=flow_sum_temp, mean)
+  
+  flow_sum[,i] <- dat_flow_sum[,2]
+  
+  ### SST
+  
+  sstTemp <- sst[sst$year >= yr_frst-i &
+               sst$year <= yr_last-i,]
+  
+  sst_win[,i] <- sstTemp[,2]
+  sst_spr[,i] <- sstTemp[,3]
+  sst_sum[,i] <- sstTemp[,4]
+  
+  ### crab catch
+  
+  crabHarv[,i] <- crabcatch[crabcatch$year >= yr_frst-i &
+                           crabcatch$year <= yr_last-i,2]
+  
+
+  
+  ### salinity
+  
+  sal[,i] <- salinity[salinity$year >= yr_frst-i &
+                         salinity$year <= yr_last-i,2]
+  
+  
+  ### air temp
+  
+  airTemp[,i] <- airtemp[airtemp$year >= yr_frst-i &
+                       airtemp$year <= yr_last-i,2]
+  
+  
+}
+
+colnames(NPGO) <- paste("NPGO","lag",year_lag)
+colnames(MEI) <- paste("MEI","lag",year_lag)
+colnames(cui_spr) <- paste("cui_spr","lag",year_lag)
+colnames(cui_sum) <- paste("cui_sum","lag",year_lag)
+colnames(flow_spr) <- paste("flow_spr","lag",year_lag)
+colnames(flow_sum) <- paste("flow_sum","lag",year_lag)
+colnames(sst_win) <- paste("sst_win","lag",year_lag)
+colnames(sst_spr) <- paste("sst_spr","lag",year_lag)
+colnames(sst_sum) <- paste("sst_sum","lag",year_lag)
+colnames(crabHarv) <- paste("crabHarv","lag",year_lag)
+colnames(sal) <- paste("sal","lag",year_lag)
+colnames(airTemp) <- paste("airTemp","lag",year_lag)
+
+## save each covariate as a seperate dataframe 
+NPGO <- data.frame(year = ts,NPGO)
+MEI <- data.frame(year = ts,MEI)
+cui_spr <- data.frame(year = ts,cui_spr)
+cui_sum <- data.frame(year = ts,cui_sum)
+flow_spr <- data.frame(year = ts,flow_spr)
+flow_sum <- data.frame(year = ts,flow_sum)
+sst_win <- data.frame(year = ts, sst_win)
+sst_spr <- data.frame(year = ts, sst_spr)
+sst_sum <- data.frame(year = ts, sst_sum)
+crabHarv <- data.frame(year = ts, crabHarv)
+sal <- data.frame(year = ts, sal)
+airTemp <- data.frame(year = ts, airTemp)
+
+## merge covariate(s) into single dataframe
+dat_cvrs <- Reduce(function(...) merge(..., all=T),
+                   list(flow_spr,flow_sum,sst_win,sst_spr,sst_sum,crabHarv,sal,
+                        airTemp,NPGO,cui_spr,cui_sum,MEI))
+
+
+## drop year col
+dat_cvrs <- dat_cvrs[,-1] 
+t(colnames(dat_cvrs))
+
+
+#---------------------------------------------------------------
+# specify functions for fitting models, identifying the best fit,
+# and extracting loadings and trends
+# --------------------------------------------------------------
+
+#----------------
+# 1. fit DFA models
+#----------------
+
+fitDFA <- function(dat,R.lvls,M.max,cov.dat){
+
+  #covariates
+  cov <- cov.dat
+  cov.names <- names(cov)
+
+  # scale the data
+  dat <- scale((dat),scale=TRUE)
+  
+  # number of ts
+  NN <- dim(dat)[2]
+  
+  # total num of models to test
+  n.set <-  M.max * dim(cov)[2] + M.max
+  
+  # empty list to store model results
+  mod.res <- vector("list", n.set)
+  
+  # init counter for model results
+  cnt <- 1
+  
+    r <- R.lvls
+    # print model info
+    cat("\n",paste("Fitting model ", cnt, " of ", n.set, sep=""))
+    #cat("\n",paste("R = ", r, sep=""))
+    cat("\n","m = 1","\n\n")
+    
+    ## fit without covariates first
+    # DFA model list 
+    DFA.model <- list(m=1, R=r)
+    
+    # set up control list for DFA
+      DFA.ctrl <- list(maxit=NN*100, trace=-1, safe=FALSE)
+    
+    # now comes the slow part--start the timer
+    timer.start <- proc.time()
+    
+    # fit DFA & store results
+    mod.res[[cnt]] <- MARSS(y=t(dat), model=DFA.model, form="dfa", z.score=TRUE, control=DFA.ctrl)
+    mod.res[[cnt]]$R <- r
+    mod.res[[cnt]]$M <- 1
+    mod.res[[cnt]]$covar <- "no covars"
+    mod.res[[cnt]]$k <- mod.res[[cnt]]$num.params
+      
+    # stop the timer
+    run.time <- round((proc.time() - timer.start)[3]/60,1)
+    cat(paste("\nRun time for 1 trend was ",run.time," min.\n\n", sep=""))
+    
+    # delete old run-time file
+    if(file.name %in% dir()) { file.remove(file.name) }
+    # write run-time to file
+    cat("Run time for 1 trend was ",run.time," min\n", sep="",
+        file=file.name, append=FALSE)
+    
+    # increment counter
+    cnt <- cnt + 1
+    
+    for(mm in 2:M.max) {
+      # print model info
+      cat("\n",paste("Fitting model ", cnt, " of ", n.set, sep=""))
+      #cat("\n",paste("R = ", r, sep=""))
+      cat("\n",paste("m = ", mm, sep=""),"\n\n")
+      
+      # now comes the slow part--start the timer
+      timer.start <- proc.time()
+      
+      # inits for DFA
+      DFA.init <- list(Z=rbind(MARSS:::vec(mod.res[[cnt-1]]$par$Z),matrix(0.1,NN-mm+1,1)),
+                       R=mod.res[[cnt-1]]$par$R)
+      # DFA model list
+      DFA.model <- list(m=mm, R=r)
+      # set up control list for DFA
+      DFA.ctrl <- list(maxit=10000, trace=-1, abstol=0.001, safe=FALSE)
+      # DFA.ctrl <- list(maxit=20000, trace=-1, abstol=0.001, safe=FALSE)
+      
+      # fit DFA & store results
+      mod.res[[cnt]] <- MARSS(y=t(dat),
+                              inits=DFA.init,
+                              model=DFA.model,
+                              form="dfa",
+                              z.score=TRUE,
+                              control=DFA.ctrl)	
+      mod.res[[cnt]]$R <- r
+      mod.res[[cnt]]$M <- mm
+      mod.res[[cnt]]$covar <- "no covars"
+      mod.res[[cnt]]$k <- mod.res[[cnt]]$num.params
+      
+      # stop the timer
+      run.time <- round((proc.time() - timer.start)[3]/60,1)
+      #cat(paste("\nRun time for ", mm, " trends was ",run.time," min.\n\n", sep=""))
+      #print(paste("Run time =", round(run.time/60,1), "hrs"))
+      cat("Run time for ", mm, " trends was ",run.time," min\n", sep="",
+          file=file.name, append=TRUE)
+      # save results
+      #save(mod.res, file=paste("seq_DFA_","clam_biomass",".RData",sep=""))
+      
+      # increment counter
+      cnt <- cnt + 1
+    }
+    
+    ## fit with covariates now
+    # DFA model list 
+    for(i in 1:dim(cov)[2]){
+    #for(i in 1:1){
+      
+      ## select appropriate combination of covariates
+      covar <- t(scale(cov[,i],scale = TRUE))
+      #covar <- t(scale(cov,scale = TRUE))
+      
+      DFA.model <- list(m=1, R=r)
+      
+      # set up control list for DFA
+      DFA.ctrl <- list(maxit=10000, trace=-1, safe=FALSE)
+      
+      # now comes the slow part--start the timer
+      timer.start <- proc.time()
+      
+      # fit DFA & store results
+      mod.res[[cnt]] <- MARSS(y=t(dat), model=DFA.model, form="dfa", z.score=TRUE, control=DFA.ctrl,covariates = covar)
+      mod.res[[cnt]]$R <- r
+      mod.res[[cnt]]$M <- 1
+      mod.res[[cnt]]$covar <-  paste(cov.names[i])
+      mod.res[[cnt]]$k <- mod.res[[cnt]]$num.params
+      #mod.res[[cnt]]$covar <-  cov.name
+      
+  
+      # stop the timer
+      run.time <- round((proc.time() - timer.start)[3]/60,1)
+      cat(paste("\nRun time for 1 trend was ",run.time," min.\n\n", sep=""))
+      
+      # delete old run-time file
+      if(file.name %in% dir()) { file.remove(file.name) }
+      # write run-time to file
+      cat("Run time for 1 trend was ",run.time," min\n", sep="",
+          file=file.name, append=FALSE)
+      
+      # increment counter
+      cnt <- cnt + 1
+      
+      for(mm in 2:M.max) {
+        # print model info
+        cat("\n",paste("Fitting model ", cnt, " of ", n.set, sep=""))
+        cat("\n",paste("m = ", mm, sep=""),"\n\n")
+        
+        # now comes the slow part--start the timer
+        timer.start <- proc.time()
+        
+        # inits for DFA
+        DFA.init <- list(Z=rbind(MARSS:::vec(mod.res[[cnt-1]]$par$Z),matrix(0.1,NN-mm+1,1)),
+                         R=mod.res[[cnt-1]]$par$R)
+        # DFA model list
+        DFA.model <- list(m=mm, R=r)
+        # set up control list for DFA
+        DFA.ctrl <- list(maxit=40000, trace=-1, abstol=0.001, safe=FALSE)
+
+        # fit DFA & store results
+        mod.res[[cnt]] <- MARSS(y=t(dat),
+                                inits=DFA.init,
+                                model=DFA.model,
+                                form="dfa",
+                                z.score=TRUE,
+                                control=DFA.ctrl, covariates = covar)	
+        mod.res[[cnt]]$R <- r
+        mod.res[[cnt]]$M <- mm
+        mod.res[[cnt]]$covar <-  paste(cov.names[i])
+        mod.res[[cnt]]$k <- mod.res[[cnt]]$num.params
+
+        # stop the timer
+        run.time <- round((proc.time() - timer.start)[3]/60,1)
+        cat(paste("\nRun time for ", mm, " trends was ",run.time," min.\n\n", sep=""))
+        #print(paste("Run time =", round(run.time/60,1), "hrs"))
+        cat("Run time for ", mm, " trends was ",run.time," min\n", sep="",
+            file=file.name, append=TRUE)
+        # save results
+        #save(mod.res, file=paste("seq_DFA_","clam_biomass",".RData",sep=""))
+        
+        # increment counter
+        cnt <- cnt + 1
+      } # next model
+      
+    } # next covariate combination 
+     
+  # build table of mod sel results
+  mod.sel.tbl <- data.frame(num=seq(1:n.set),
+                            k=sapply(mod.res, function(x) x[["k"]]),
+                            M=sapply(mod.res, function(x) x[["M"]]),
+                            cov = sapply(mod.res, function(x) x[["covar"]]),
+                            AICc=sapply(mod.res, function(x) x[["AICc"]]),
+                            converged = sapply(mod.res, function(x) x[["convergence"]]))
+  
+  
+  # calculate delta-AICc
+  mod.sel.tbl$delta.AICc <- mod.sel.tbl$AICc - min(mod.sel.tbl$AICc)
+  
+  # calculate Akaike weights
+  wt <- exp(-0.5*mod.sel.tbl$delta.AICc)
+  mod.sel.tbl$Ak.wt <- wt/sum(wt)
+  
+  # sort results
+  AICc.tbl <- mod.sel.tbl[order(mod.sel.tbl$AICc),]
+  
+  # get the results from the best model
+  bi <- AICc.tbl[1,"M"]
+  n <- AICc.tbl[1,"num"]
+  best.fit <- mod.res[[n]]
+  
+  out <- list(AICc.tbl,best.fit,bi,mod.res)
+  
+  return(out)
+  
+} # end function
+
+
+#--------------------------------------------------------
+# 2. extract loadings and trends from MARSS model objects
+#--------------------------------------------------------
+
+rotate <- function(model,trends){
+  best.fit <- model
+  # rotate factors & trends if M > 1
+  if(trends > 1) {
+    # get the inverse of the rotation matrix
+    H.inv <- varimax(coef(best.fit, type="matrix")$Z)$rotmat
+    # rotate factor loadings
+    Z.rot <- coef(best.fit, type="matrix")$Z %*% H.inv   
+    # rotate trends
+    trends.rot <- solve(H.inv) %*% best.fit$states
+  } else {
+    Z.rot <- coef(best.fit, type="matrix")$Z
+    trends.rot <- best.fit$states
+  }
+  
+  return(list(Z.rot,trends.rot))
+  
+}
+
+
+#---------------------------------
+# Implement DFA for entire dataset
+#---------------------------------
+ 
+entire.DFA.species.R <- fitDFA(dat = entire,R.lvls = speciesVarCov,M.max = 3,cov.dat = dat_cvrs)
+entire.DFA.species.R[[1]]$R <- "species var no cov"
+
+  
+####output candidate models to table
+outFile="DFA Model Results.csv"
+write.table(entire.DFA.species.R[[1]], outFile, quote=FALSE, sep=",", append=FALSE, col.names=NA)
+
+
+# save workspace
+dir.create(paste(getwd(),Sys.Date(),sep="/"))
+setwd(paste(getwd(),Sys.Date(),sep="/"))
+sav.models <- paste("MARSS MODEL OBJECTS_",Sys.Date(),
+                    sep="_")
+save(list=ls(), file=paste(sav.models,"RData",sep="."))
+
+#-----------------------------------------------------
+# Extract loadings and trends for each candidate model
+#-----------------------------------------------------
+
+rotate.entire <- rotate(entire.DFA.species.R[[2]],trends = entire.DFA.species.R[[3]])
+
+###check residuals of best model for normality
+best.fit <- entire.DFA.species.R[[2]]
+residuals(best.fit)$model.residual
+
+plotdat = (scale(dat))
+matrix.of.biases = matrix(coef(best.fit, type="matrix")$A,
+                          nrow=nrow(plotdat),ncol=ncol(plotdat),byrow=T)
+xs = matrix(best.fit$states,
+            nrow=dim(plotdat)[1],ncol=dim(plotdat)[2],byrow=F)
+resids = t(residuals(best.fit)$model.residual)
+
+
+tiff(file = "modelResids.tiff", width = 12, height = 12, units = "in", res = 500)
+
+  par(mfrow=c(6,5),mar = c(2,2,1.5,1), omi = c(0.5,0.5,0.2,1.5), cex.axis = 1.3)
+  for(i in 1:dim(dat)[2]){
+    plot(resids[!is.na(resids[,i]),i],ylab="residuals")
+    #title(legendnames[i])
+  }
+
+dev.off()
+
+#-----------------------------------------------------
+# Extract and plot Covariate Effects
+#-----------------------------------------------------
+
+# Entire DFA
+entire.with.hess.CIs = MARSSparamCIs(entire.DFA.species.R[[2]])
+entire.upper <- entire.with.hess.CIs[["par.upCI"]]$A
+entire.lower <- entire.with.hess.CIs[["par.lowCI"]]$A
+entire.mean <- entire.with.hess.CIs[["par"]]$A
+
+
+
+#------------------------
+# Plot covariate effects
+#------------------------
+
+tiff(file = "species_covariate_effects.tiff", width = 5, height = 5, units = "in", res = 500)
+
+  lay <- layout(matrix(c(1,1,1,1),2,2),c(3,4),c(1,1))
+  layout.show(lay)
+  
+  #layout(matrix(c(1,3,2,4),2,2),heights=rep(4,3))
+  
+
+
+  
+  ## plot NPGO effects on Leu biomass
+  
+  
+  plot(1:10,entire.mean[1:10],
+       type="n", lwd=2, xlab="", ylab="", xaxt="n", ylim=c(-1.2,2.1), xlim=c(1,32), yaxt = "n")
+  abline(h = 0,col = "grey", lty = 2)
+  segments(1:10,rep(entire.mean[1:10],length(1:10)),1:10,entire.upper[1:10])
+  segments(1:10,rep(entire.mean[1:10],length(1:10)),1:10,entire.lower[1:10])
+  points(1:10,entire.mean[1:10],pch = 16,col = "darkorchid")
+  
+  axis(1, at = 1:10, labels = substr(names(sax),4,5),cex.axis = 1,las = 2,tick = TRUE)
+
+  ##
+  
+  segments(12:21,rep(entire.mean[11:20],length(11:20)),12:21,entire.upper[11:20])
+  segments(12:21,rep(entire.mean[11:20],length(11:20)),12:21,entire.lower[11:20])
+  points(12:21,entire.mean[11:20],pch = 16,col = "forestgreen")
+  
+  axis(1, at = 12:21, labels = substr(names(sax),4,5),cex.axis = 1,las = 2,tick = TRUE)
+  
+  
+  ##
+  
+  segments(23:32,rep(entire.mean[21:30],length(21:30)),23:32,entire.upper[21:30])
+  segments(23:32,rep(entire.mean[21:30],length(21:30)),23:32,entire.lower[21:30])
+  points(23:32,entire.mean[21:30],pch = 16,col = "dodgerblue2")
+  
+  axis(1, at = 23:32, labels = substr(names(sax),4,5),cex.axis = 1,las = 2,tick = TRUE)
+  axis(2, at = seq(-1,1,1), labels = seq(-1,1,1),cex.axis = 1,las = 2,tick = TRUE)
+  
+ #legend("topleft", legend = "A",bty ="n", cex = 1.3)
+  
+  
+  mtext("NPGO effect",side = 2,line = 2, cex = 1.2)
+  mtext("Beach",side = 1, line = 2.5, cex = 1.2)
+  
+  
+  subplot(plot(NPGO[,5]~NPGO[,1],type = "l",pch = 16,cex = 1.2,
+               ylab = "NPGO Index",xlab = "Year",mgp=c(1.4,0.4,0),
+               cex.axis=0.9,col = "black"), 
+          x=grconvertX(c(0.6,0.9), from='npc'),
+          y=grconvertY(c(0.7,0.9), from='npc'),abline(h = 0,lty = 2))
+  
+  
+  
+  points(NPGO[,5]~NPGO[,1],pch = 16)
+  
+  #par(mai=c(0.3,0,.3,0.3))
+  
+  #plot(NPGO[,5]~NPGO[,1],type = "l")
+  #points(NPGO[,5]~NPGO[,1],pch = 16)
+  
+  #legend("topleft", legend = "B",bty ="n", cex = 1.3)
+  
+  #mtext("NPGO Index",side = 2,line = 2, cex = 1.2)
+  #mtext("Year",side = 1, line = 2, cex = 1.2)
+  
+  
+  
+dev.off()
+
+
+#--------------------------------------------------------
+# Plot model fits of the top DFA model 
+#--------------------------------------------------------
+
+
+## global model fits with all species
+tiff(file = "entire_DFA_modelFits.tiff", width = 5, height = 6, units = "in", res = 300)
+  
+  NN.entire <- dim(dat)[2]
+  NN.sax <- dim(sax)[2]
+  NN.leuk <- dim(leu)[2]
+  NN.cli <- dim(cli)[2]
+  
+  
+  par(mfrow=c(6,5),mar = c(1,1,1.5,1), omi = c(0.5,0.5,0.2,0.3), cex.axis = 0.8)
+  
+  clr <- rgb(0, 0, 100, alpha = 50, maxColorValue = 255)
+  
+  best.fit <- entire.DFA.species.R[[2]]
+  par.mat=coef(best.fit, type="matrix")
+  fit.b <- par.mat$Z %*% best.fit$states + matrix(par.mat$A, nrow=NN.entire, ncol=TT)
+  fit.b.lower <- fit.b - (par.mat$Z %*% best.fit$states.se + matrix(par.mat$A, nrow=NN.entire, ncol=TT))*1.96
+  fit.b.upper <- fit.b + (par.mat$Z %*% best.fit$states.se + matrix(par.mat$A, nrow=NN.entire, ncol=TT))*1.96
+
+  
+  dat.temp <- scale(sax,scale = TRUE)
+  
+  
+  for(i in 1:NN.sax){
+    
+    plot(dat.temp[,i]~years,xlab="",ylab="", xaxt="n", ylim=c(-4,4.5), pch=1, col="black",yaxt = "n",cex = 0.6)
+    axis(2,at = c(-3,0,3),labels = c(-3,0,3))
+    #title(substr(names(sax)[i],4,5),col.main = "black", cex.main = 2, line = -0.8)
+    text(1991,3.4,labels = substr(names(sax)[i],4,5),bty = "n",col= "black", cex= 0.8)
+    
+    #axis(1,at = seq(6,29,5),labels = c(1985,1990,1995,2000,2005))
+    lines(fit.b[i,]~years, lwd=2, col = "darkorchid")
+    #title(substr(names(sax)[i],4,5),col.main = "darkorchid", cex = 0.9, line = -0.8)
+    abline(h=0, lty = 2, lwd=1, col="black") 
+    
+    if(i == 5){mtext("Sax.",side = 4,line = 0.5,cex = 1,las = 2)}
+    
+    axis(1,at = c(1990,2000,2010),labels = c(1990,2000,2010))
+    polygon(c(years,rev(years)),c(fit.b.upper[i,],rev(fit.b.lower[i,])), col=clr, border=NA)
+    
+    
+  }
+  
+
+  dat.temp <- scale(leu,scale = TRUE)
+  
+  c <- 11:20
+  for(i in 1:NN.leuk){
+    
+    plot(dat.temp[,i]~years,xlab="",ylab="", xaxt="n", ylim=c(-4,4.5), pch=1, col="black",yaxt = "n",cex = 0.6)
+    axis(2,at = c(-3,0,3),labels = c(-3,0,3))
+    #title(substr(names(sax)[i],4,5),col.main = "black", cex.main = 2, line = -0.8)
+    text(1991,4,labels = substr(names(sax)[i],4,5),bty = "n",col= "black", cex= 0.8)
+    
+    #axis(1,at = seq(6,29,5),labels = c(1985,1990,1995,2000,2005))
+    lines(fit.b[c[i],]~years, lwd=2, col = "forestgreen")
+    #title(substr(names(sax)[i],4,5),col.main = "forestgreen", cex = 0.9, line = -0.8)
+    abline(h=0, lty = 2, lwd=1, col="black") 
+    
+    if(i == 5){mtext("Leu.",side = 4,line = .5,cex = 1,las = 2)}
+    
+    axis(1,at = c(1990,2000,2010),labels = c(1990,2000,2010))
+    polygon(c(years,rev(years)),c(fit.b.upper[c[i],],rev(fit.b.lower[c[i],])), col=clr, border=NA)
+    
+  }
+  
+  
+  dat.temp <- scale(cli,scale = TRUE)
+  
+  c <- 21:30
+  for(i in 1:NN.cli){
+    
+    plot(dat.temp[,i]~years,xlab="",ylab="", xaxt="n", ylim=c(-4,4.5), pch=1, col="black",yaxt = "n",cex = 0.6)
+    axis(2,at = c(-3,0,3),labels = c(-3,0,3))
+    text(1991,4,labels = substr(names(sax)[i],4,5),bty = "n",col= "black", cex= 0.8)
+    
+    #axis(1,at = seq(6,29,5),labels = c(1985,1990,1995,2000,2005))
+    lines(fit.b[c[i],]~years, lwd=2, col = "dodgerblue2")
+    #title(substr(names(sax)[i],4,5),col.main = "dodgerblue2", cex = 0.9, line = -0.8)
+    abline(h=0, lty = 2, lwd=1, col="black") 
+    
+    if(i == 5){mtext("Cli.",side = 4,line = .5,cex = 1,las = 2)}
+    
+    axis(1,at = c(1990,2000,2010),labels = c(1990,2000,2010))
+    polygon(c(years,rev(years)),c(fit.b.upper[c[i],],rev(fit.b.lower[c[i],])), col=clr, border=NA)
+    
+    
+  }
+  
+  
+  mtext("Biomass index", side = 2,line = 1.5, outer = TRUE, cex = 1.4)
+  mtext("Year",side = 1,line = 2, outer = TRUE, cex = 1.4)
+  
+  
+  dev.off()
+
+
+### Plots of loadings and trends are a work in progress
+
+#--------------------------------------------------------
+# Plot loadings and trends for top global DFA
+#--------------------------------------------------------
+tiff(file = "entire_Seq_DFA_LoadingsAndTrend.tiff", width = 4, height = 6, units = "in", res = 300)
+
+  layout(matrix(c(1,2,3,4,5,6),2,3),heights=c(4,10))
+  
+  
+  par(mai=c(0.2,0.4,0,0), omi=c(0.8,0.1,0.5,0))
+  
+  
+  col <- c(rep("dodgerblue2",10),rep("forestgreen",10),rep("darkorchid",10))
+  
+  # get ts of trends
+  ts.trends <- t(rotate.entire[[2]])
+  Z.rot <- (rotate.entire[[1]])
+  # loop over each trend
+  i <-1
+  
+  # trend 1
+  # set up plot area
+  plot(ts.trends[,i],
+       ylim=c(-1.1,1.1+1)*max(abs(ts.trends)), 
+       type="n", lwd=2, 
+       xlab="", ylab="", xaxt="n", yaxt="n")
+  mtext("Trend 1",3,line = 0,cex = 1)
+  # draw zero-line
+  # plot trend line
+  par(new=TRUE)
+  plot(ts.trends[,1],
+       ylim=c(-1.1,1.1)*max(abs(ts.trends)), 
+       type="l", lwd=2, bty="L", 
+       xlab="", ylab="", xaxt="n", col = "black")
+  abline(h=0, col="gray")
+  
+  # add panel labels
+  axis(1,at = seq(2,28,10),labels = c(1990,2000,2010))
+  
+  par(mai=c(0,0.2,0.5,0.2))
+  
+  
+  
+  barplot(Z.rot[30:1,1],horiz = TRUE, width = 0.5, space = 1,col = col,xlim = c(-0.4,0.4))
+  abline(h=10.3, col="gray",lty = 2)
+  abline(h=20.3, col="gray",lty = 2)
+  text(c(-0.28,-0.28,-0.28),y = c(8,18,28),labels = c("Cli.","Leu.","Sax."),cex = 1)
+  
+  abline(v = 0)
+  axis(2,at = seq(1,30,1),labels = c(rev(substr(names(sax),4,5)),rev(substr(names(sax),4,5)),rev(substr(names(sax),4,5))),tick = FALSE,las = 2)
+  # trend 2
+  # set up plot area
+  i <- 2
+  par(mai=c(0.2,0.4,0,0))
+  plot(ts.trends[,i],
+       ylim=c(-1.1,1.1+1)*max(abs(ts.trends)), 
+       type="n", lwd=2, 
+       xlab="", ylab="", xaxt="n", yaxt="n")
+  
+  # plot trend line
+  par(new=TRUE)
+  plot(ts.trends[,i],
+       ylim=c(-1.1,1.1)*max(abs(ts.trends)), 
+       type="l", lwd=2, bty="L", 
+       xlab="", ylab="", xaxt="n", col = "black")
+  mtext("Trend 2",3,line = 0,cex = 1)
+  
+  # draw zero-line
+  abline(h=0, col="gray")
+  # add panel labels
+  #mtext(paste("Trend",i,sep=" "), side=3, line=-0.5)
+  axis(1,at = seq(2,28,10),labels = c(1990,2000,2010))
+  
+  par(mai=c(0,0.2,0.5,0.2))
+  
+  barplot(Z.rot[30:1,2],horiz = TRUE, width = 0.5, space = 1,col = col, xlim = c(-0.4,0.4))
+  abline(v = 0)
+  abline(h=10.3, col="gray",lty = 2)
+  abline(h=20.3, col="gray",lty = 2)
+  
+   #trend 3
+   #set up plot area
+  i <- 3
+  par(mai=c(0.2,0.4,0,0))
+  plot(ts.trends[,i],
+       ylim=c(-1.1,1.1+1)*max(abs(ts.trends)), 
+       type="n", lwd=2, 
+       xlab="", ylab="", xaxt="n", yaxt="n")
+  
+  #plot trend line
+  par(new=TRUE)
+  plot(ts.trends[,i],
+       ylim=c(-1.1,1.1)*max(abs(ts.trends)), 
+       type="l", lwd=2, bty="L", 
+       xlab="", ylab="", xaxt="n", col = "black")
+  mtext("Trend 3",3,line = 0,cex = 1)
+  
+  #draw zero-line
+  abline(h=0, col="gray")
+  #add panel labels
+  axis(1,at = seq(2,28,10),labels = c(1990,2000,2010))
+  
+  par(mai=c(0,0.2,0.5,0.2))
+  
+  barplot(Z.rot[30:1,i],horiz = TRUE, width = 0.5, space = 1,col = col,xlim = c(-0.6,0.8))
+  abline(v = 0)
+  abline(h=10.3, col="gray",lty = 2)
+  abline(h=20.3, col="gray",lty = 2)
+  
+  mtext("Factor loadings",side = 1,line = 3, outer = TRUE, cex = 1.2)
+
+dev.off()
+
+
+#--------------------------------------------------------
+# Conduct ANOSIM-MDS on factor loadings
+#--------------------------------------------------------
+ts.trends <- t(rotate.entire[[2]])
+Z.rot <- (rotate.entire[[1]])
+
+## euclidean distance matrix for factor loadings
+d <- dist((Z.rot))
+
+
+## specify groupings for three ANOSIM's 
+species <- factor(c(rep("sax",10),rep("leu",10),rep("cli",10)))
+beach <- factor(rep(c("ca","wc","ss","sn","ii","pt","wp","st","ps","pd"),3))
+geogroup <- factor(rep(c("admiralty","admiralty","admiralty","admiralty","admiralty","admiralty",
+              "hood","admiralty","hood","hood"),3))
+
+## species ANOSIM
+d.ano.species <- anosim(Z.rot,grouping = species,distance = "euclidean")
+summary(d.ano.species)
+plot(d.ano.species)
+
+## beach ANOSIM
+d.ano.beach <- anosim(Z.rot,grouping = beach,distance = "euclidean")
+summary(d.ano.beach)
+plot(d.ano.beach)
+
+## geography ANOSIM
+d.ano.geo <- anosim(Z.rot,grouping = geogroup,distance = "euclidean")
+summary(d.ano.geo)
+plot(d.ano.geo)
+
+
+## conduct MDS using computed distance matrix
+fit <- cmdscale(d,eig=TRUE, k=2) # k is the number of dim
+fit # view results
+
+col <- c(rep("darkorchid",10),rep("forestgreen",10),rep("dodgerblue2",10))
+
+
+tiff(file = "entire_MDS.tiff", width = 5, height = 5, units = "in", res = 300)
+par(mfrow = c(2,2),mai=c(0.3,0.3,0.3,0.3), omi=c(0.5,0.5,0.1,0.1))
+
+x <- fit$points[,1]
+y <- fit$points[,2]
+plot(x, y, xlab="", ylab="", 
+     main="",	type="n",ylim = c(-.4,.4))
+text(x, y, labels = substr(names(sax),4,5), cex=.7,col = col)
+
+x <- ordiellipse(fit,groups = species,col = c("dodgerblue","forestgreen","darkorchid"), draw="polygon"
+                 ,kind = "sd")
+ordispider(fit,groups = species,col = c("dodgerblue","forestgreen","darkorchid"))
+#mtext("Coordinate 1",1,line = 2.5,cex = 1.2)
+#mtext("Coordinate 2",2,line = 2.5,cex = 1.2)
+legend("topright",legend = c("R = 0.124", "P = 0.022"), bty = "n",cex = 0.8)
+mtext("Species",3,line = 0,adj = 1,cex = 0.8)
+
+x <- fit$points[,1]
+y <- fit$points[,2]
+
+#par(mai=c(0.8,0.8,0.4,0.4))
+plot(x, y, xlab="", ylab="", 
+     main="",	type="n",ylim = c(-.4,0.4))
+
+col <- c(rep("darkorchid",10),rep("forestgreen",10),rep("dodgerblue2",10))
+
+text(x, y, labels = substr(names(sax),4,5), cex=.7,col = col)
+
+x <- ordiellipse(fit,groups = beach,col = "gray86", draw="polygon"
+                 ,kind = "sd")
+
+ordispider(fit,groups = beach,col = "black")
+
+legend("topright",legend = c("R = 0.066", "P = 0.238"), bty = "n",cex = 0.8)
+
+mtext("Beach",3,line = 0,adj = 1, cex = 0.8)
+
+
+x <- fit$points[,1]
+y <- fit$points[,2]
+
+#par(mai=c(0.8,0.8,0.4,0.4))
+plot(x, y, xlab="", ylab="", 
+     main="",	type="n",ylim = c(-.4,0.4))
+
+col <- c(rep("darkorchid",10),rep("forestgreen",10),rep("dodgerblue2",10))
+
+text(x, y, labels = substr(names(sax),4,5), cex=.7,col = col)
+
+x <- ordiellipse(fit,groups = geogroup,col = "gray86", draw="polygon"
+                 ,kind = "sd")
+
+ordispider(fit,groups = geogroup,col = "black")
+
+mtext("Geography",3,line = 0,adj = 1, cex = 0.8)
+
+legend("topright",legend = c("R = 0.233", "P = 0.013"), bty = "n",cex = 0.8)
+
+mtext("Coordinate 1",1,line = 0.5,cex = 1, outer = TRUE)
+mtext("Coordinate 2",2,line = 0.5,cex = 1,outer = TRUE)
+
+
+dev.off()
+
+
