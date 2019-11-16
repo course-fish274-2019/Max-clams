@@ -10,7 +10,12 @@ library(dplyr)
 library(ggplot2)
 ```
 ```{r}
-clam_data <- read.csv("../data/SuppTable1_ClamData_DFA.csv") 
 clam_salinity_data <- read.csv("../data/SuppTable2_Salinity_DFA.csv")
+```
+
+```{r} 
+## Manipulated Code
+filter(clam_salinity_data, salinity > 31) 
+ggplot(data = clam_salinity_data, aes(x = year, y = salinity))
 ```
 
