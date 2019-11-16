@@ -10,12 +10,14 @@ library(dplyr)
 library(ggplot2)
 ```
 ```{r}
-clam_salinity_data <- read.csv("../data/SuppTable2_Salinity_DFA.csv")
+clam_salinity_data <- read.csv("../data/SuppTable2_Salinity_DFA.csv") 
+#This is data from a study about clams, specifically tracking changes in salinity over time. 
 ```
 
 ```{r} 
 ## Manipulated Code
 filter(clam_salinity_data, salinity > 31) 
-ggplot(data = clam_salinity_data, aes(x = year, y = salinity))
+ggplot(data = clam_salinity_data, aes(x = year, y = salinity)) 
+#This code filters the data to include only data points with salinities greater than 31, the graph displays salinity for each yearly data point. 
 ```
-
+## I don't know how to insert a picture 
