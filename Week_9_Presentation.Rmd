@@ -1,0 +1,19 @@
+---
+title: "Week_9_Presentation"
+author: "Max Cohen"
+date: "11/21/2019"
+output: ioslides_presentation
+---
+
+``` {r} 
+## Required Packages 
+library(tidyverse) 
+library(dplyr) 
+library(ggplot2) 
+``` 
+
+```{r}
+clam_salinity_data <- read.csv("../data/SuppTable2_Salinity_DFA.csv")
+large <- clam_salinity_data %>% filter(salinity > 31) 
+```
+
