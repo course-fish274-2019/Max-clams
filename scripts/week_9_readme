@@ -1,0 +1,11 @@
+Project Purpose: to create slides that show our ability to manipulate data using skills learned in dplyr, ggplot, and especially tidyverse. 
+
+R Packages: 
+dplyr 
+ggplot2 
+tidyverse 
+
+Files Used: 
+SuppTable1_ClamData_DFA.csv, General clam data 
+SuppTable2_Salinity_DFA.csv, data for clam salinity
+SuppTable3_AirTemp_DFA.csv, data for clam air temperature
