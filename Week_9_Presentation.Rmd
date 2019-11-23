@@ -5,6 +5,8 @@ date: "11/21/2019"
 output: ioslides_presentation
 ---
 
+##The code examined here involves many different data values for clams over a long period of time. The data I'm working with mainly focuses on salinity and air temperature readings from clam habitats in Canada and Puget Sound islands. 
+
 ``` {r} 
 ## Required Packages 
 library(tidyverse) 
@@ -13,7 +15,32 @@ library(ggplot2)
 ``` 
 
 ```{r}
-clam_salinity_data <- read.csv("../data/SuppTable2_Salinity_DFA.csv")
+## Filters the data to separate values with salinity > 31
+clam_salinity_data <- read.csv("data/SuppTable2_Salinity_DFA.csv")
 large <- clam_salinity_data %>% filter(salinity > 31) 
+```
+
+```{r}
+## Gathers each separate year with a data value for clam salinity
+gather(clam_salinity_data, key = "key", value = "salinity", na.rm = TRUE)
+```
+
+```{r}
+## This code joins the clam_salinity_data table with the table for air temperature
+clam_temp_data <- read.csv("data/SuppTable3_AirTemp_DFA.csv") 
+inner_join(clam_temp_data, clam_salinity_data, by = NULL, copy = FALSE)
+```
+
+```{r}
+## This code graphs the salinity data
+ggplot(data = clam_salinity_data) +
+  geom_point(mapping = aes(x = year, y = salinity))
+  
+```
+
+```{r}
+## This code graphs the air temperature data 
+ggplot(data = clam_temp_data) +
+  geom_point(mapping = aes(x = year, y = airtemp))
 ```
 
