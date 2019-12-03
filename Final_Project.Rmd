@@ -44,3 +44,8 @@ ggplot(data = clam_temp_data) +
   geom_point(mapping = aes(x = year, y = airtemp))
 ```
 
+```{r}
+install.packages("here")
+read.csv(Max-clams/)
+```
+
