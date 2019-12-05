@@ -5,8 +5,9 @@ date: "11/21/2019"
 output: ioslides_presentation
 ---
 
-##The code examined here involves many different data values for clams over a long period of time. The data I'm working with mainly focuses on salinity and air temperature readings from clam habitats in Canada and Puget Sound islands. 
+##The code examined here is a collection of various readings from clam habitats in Canada and the islands of the Puget Sound. These readings and their analysis are from "Spatial and Temporal Coherence in Intertidal Clams". The study investigated how different factors such as salinity and air and sea temperature affect biomass in clam populations over a period of several decades. The clam response to these factors was also found to vary by species. 
 
+##Here are the programs in R that I used
 ``` {r} 
 ## Required Packages 
 library(tidyverse) 
@@ -14,38 +15,52 @@ library(dplyr)
 library(ggplot2) 
 ``` 
 
+## Now we are reading in the data files
+```{r}
+clam_general_data <- read.csv("data/SuppTable1_ClamData_DFA.csv")
+clam_salinity_data <- read.csv("data/SuppTable2_Salinity_DFA.csv") 
+clam_temp_data <- read.csv("data/SuppTable3_AirTemp_DFA.csv")  
+crabcatch_data <- read.csv("data/SuppTable4_CrabCatch_DFA.csv")
+rawseatemp_data <- read.csv("data/SuppTable5_SST_DFA.csv")
+```
+##How to average data columns
+```{r}
+
+```
+
 ```{r}
 ## Filters the data to separate values with salinity > 31
-clam_salinity_data <- read.csv("data/SuppTable2_Salinity_DFA.csv")
-large <- clam_salinity_data %>% filter(salinity > 31) 
+filter(clam_salinity_data, salinity > 31) 
+## We can see here that salinity was lowest in the 90's, and started to increase thereafter
+```
+##Errors below
+```{r}
+## Gathers the three separate columns for sea surface temperature reading in to one sorted by year 
+sea_temp <- mutate(gather(rawseatemp_data, key = "year", value = "sea_temp", na.rm = FALSE, convert = FALSE, factor_key = FALSE))
 ```
 
 ```{r}
-## Gathers each separate year with a data value for clam salinity
-gather(clam_salinity_data, key = "key", value = "salinity", na.rm = TRUE)
-```
-
-```{r}
-## This code joins the clam_salinity_data table with the table for air temperature
-clam_temp_data <- read.csv("data/SuppTable3_AirTemp_DFA.csv") 
+## This code joins the clam_salinity_data table with the table for air temperature. Doing this lets us see the contrasting patterns in temperature and salinity side by side. 
 inner_join(clam_temp_data, clam_salinity_data, by = NULL, copy = FALSE)
 ```
 
 ```{r}
 ## This code graphs the salinity data
 ggplot(data = clam_salinity_data) +
-  geom_point(mapping = aes(x = year, y = salinity))
-  
+  geom_point(mapping = aes(x = year, y = salinity)) 
+## We see from this plot that generally, salinity is decreasing over time. 
 ```
 
 ```{r}
 ## This code graphs the air temperature data 
 ggplot(data = clam_temp_data) +
-  geom_point(mapping = aes(x = year, y = airtemp))
+  geom_point(mapping = aes(x = year, y = airtemp)) 
+##While air temperature readings are varied for the first 20-25 years, after 2010 they begin to climb rapidly. This is consistent with global air temperatures rising as well. 
 ```
-
+##Can't graph until mutate is done
 ```{r}
-install.packages("here")
-read.csv(Max-clams/)
+##This code graphs the data for sea surface temperature  
+ggplot(data = rawseatemp_data) +
+  geom_point(mapping = aes(x = year, y = sst_jan_mar))
 ```
 
