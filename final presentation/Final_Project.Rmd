@@ -1,7 +1,7 @@
 ---
-title: "Week_9_Presentation"
+title: "Final Project"
 author: "Max Cohen"
-date: "11/21/2019"
+date: "12/11/2019"
 output: ioslides_presentation
 ---
 
@@ -80,4 +80,4 @@ ggplot(data = mean_clam_general_data) +
 ##Biomass readings went up since their lowest point in 1990. This could reflect a number of things, including a decreased rate of global climate change since the late 20th century, and an increase in environmental legislation and protection
 ```
 
-## To conclude,
+## In Conclusion, this investigation has revealed that patterns of global change are affecting clams and other shellfish. While the biomass readings do seem to refute this, it would be more than likely that that is due to a number of non-climate-related factors
