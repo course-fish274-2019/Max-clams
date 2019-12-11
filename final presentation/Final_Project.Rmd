@@ -20,12 +20,14 @@ library(ggplot2)
 clam_general_data <- read.csv("data/SuppTable1_ClamData_DFA.csv")
 clam_salinity_data <- read.csv("data/SuppTable2_Salinity_DFA.csv") 
 clam_temp_data <- read.csv("data/SuppTable3_AirTemp_DFA.csv")  
-crabcatch_data <- read.csv("data/SuppTable4_CrabCatch_DFA.csv")
 rawseatemp_data <- read.csv("data/SuppTable5_SST_DFA.csv")
 ```
-##How to average data columns
-```{r}
 
+##Here are the data transformations I did
+```{r}
+## Here we are averaging each data column for the general clam biomass data
+mean_clam_general_data <- mutate(clam_general_data, Mean = rowMeans(select(clam_general_data, starts_with("sa")), na.rm = TRUE)) 
+print(mean_clam_general_data)
 ```
 
 ```{r}
@@ -33,34 +35,49 @@ rawseatemp_data <- read.csv("data/SuppTable5_SST_DFA.csv")
 filter(clam_salinity_data, salinity > 31) 
 ## We can see here that salinity was lowest in the 90's, and started to increase thereafter
 ```
-##Errors below
+
 ```{r}
-## Gathers the three separate columns for sea surface temperature reading in to one sorted by year 
-sea_temp <- mutate(gather(rawseatemp_data, key = "year", value = "sea_temp", na.rm = FALSE, convert = FALSE, factor_key = FALSE))
+## Averages the three separate columns for sea surface temperature reading in to one column sorted by year 
+edited_seatemp_data <- mutate(rawseatemp_data, Mean = rowMeans(select(rawseatemp_data, starts_with("sst")), na.rm = TRUE)) 
+print(edited_seatemp_data)
 ```
 
 ```{r}
 ## This code joins the clam_salinity_data table with the table for air temperature. Doing this lets us see the contrasting patterns in temperature and salinity side by side. 
-inner_join(clam_temp_data, clam_salinity_data, by = NULL, copy = FALSE)
+inner_join(clam_temp_data, clam_salinity_data)
 ```
 
+## Here are the graphs I made
 ```{r}
 ## This code graphs the salinity data
 ggplot(data = clam_salinity_data) +
-  geom_point(mapping = aes(x = year, y = salinity)) 
+  geom_point(mapping = aes(x = year, y = salinity)) + 
+  labs(y = "salinity", title = "Salinity Readings Over Time")
 ## We see from this plot that generally, salinity is decreasing over time. 
 ```
 
 ```{r}
 ## This code graphs the air temperature data 
 ggplot(data = clam_temp_data) +
-  geom_point(mapping = aes(x = year, y = airtemp)) 
+  geom_point(mapping = aes(x = year, y = airtemp)) + 
+  labs(y = "air temperature", title = "Air Temperature Readings Over Time")
 ##While air temperature readings are varied for the first 20-25 years, after 2010 they begin to climb rapidly. This is consistent with global air temperatures rising as well. 
 ```
-##Can't graph until mutate is done
+
 ```{r}
 ##This code graphs the data for sea surface temperature  
-ggplot(data = rawseatemp_data) +
-  geom_point(mapping = aes(x = year, y = sst_jan_mar))
+ggplot(data = edited_seatemp_data) +
+  geom_point(mapping = aes(x = year, y = Mean)) +
+  labs(y = "surface temperature", title = "Mean Sea Surface Temperature Over Time") 
+##Surface Temperature appears to be becoming more increasingly variable, which is in line with what we know about global climate change
 ```
 
+```{r}
+##Finally we are graphing the averages for the clam biomass data 
+ggplot(data = mean_clam_general_data) +
+  geom_point(mapping = aes(x = year, y = Mean)) + 
+  labs(y = "biomass", title = "Average Clam Biomass Per Year") 
+##Biomass readings went up since their lowest point in 1990. This could reflect a number of things, including a decreased rate of global climate change since the late 20th century, and an increase in environmental legislation and protection
+```
+
+## To conclude,

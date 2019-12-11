@@ -1,6 +1,6 @@
-Project Purpose: to create slides that show our ability to manipulate data using skills learned in dplyr, ggplot, and especially tidyverse. 
+Project Purpose: to investigate the biomass response of clams to changes in temperature and salinity by manipulating datasets and creating graphs using tidyverse, dplyr, and ggplot skills. 
 
-R Packages: 
+R Packages Used: 
 dplyr 
 ggplot2 
 tidyverse 
@@ -8,4 +8,5 @@ tidyverse
 Files Used: 
 SuppTable1_ClamData_DFA.csv, General clam data 
 SuppTable2_Salinity_DFA.csv, data for clam salinity
-SuppTable3_AirTemp_DFA.csv, data for clam air temperature
+SuppTable3_AirTemp_DFA.csv, data for clam air temperature 
+SuppTable5_SST_DFA.csv, data for sea surface temperature
